@@ -1,0 +1,28 @@
+# IDE
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Data & model artifacts
+dataset/
+train_set/
+augmentations/
+*.joblib
+
+# Project PDF
+IML_Private_proj_2.pdf
+
+# OS
+.DS_Store
+Thumbs.db
