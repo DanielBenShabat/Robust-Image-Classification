@@ -20,6 +20,9 @@ train_set/
 augmentations/
 *.joblib
 
+# Generated split manifest (reproducible from preprocessing.py + seed)
+split.json
+
 # Project PDF
 IML_Private_proj_2.pdf
 
