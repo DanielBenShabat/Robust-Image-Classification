@@ -23,6 +23,9 @@ augmentations/
 # Generated split manifest (reproducible from preprocessing.py + seed)
 split.json
 
+# Augmentation preview output (throwaway visual inspection)
+aug_preview/
+
 # Project PDF
 IML_Private_proj_2.pdf
 
