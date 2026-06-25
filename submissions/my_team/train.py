@@ -31,7 +31,6 @@ import torch
 import torch.nn as nn
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
 
 # ── paths (resolved from this file, so cwd does not matter) ────────────────────
 THIS_DIR = Path(__file__).resolve().parent
@@ -40,13 +39,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from model import ModelArchitecture  # noqa: E402  (this file's dir is on sys.path)
+from augmentations import build_train_transform, build_eval_transform  # noqa: E402
 
 DATA_ROOT = PROJECT_ROOT / "dataset"
 SPLIT_JSON = THIS_DIR / "split.json"
 OUTPUT = THIS_DIR / "weights.joblib"
-
-IMAGENET_MEAN = (0.485, 0.456, 0.406)
-IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
 # ── dataset that reads the split.json manifest ─────────────────────────────────
@@ -67,16 +64,6 @@ class ManifestDataset(Dataset):
         if self.transform:
             image = self.transform(image)
         return image, label
-
-
-def build_transform() -> transforms.Compose:
-    """Deterministic preprocessing, identical to the grader's pipeline."""
-    return transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
-    ])
 
 
 def subsample_per_class(entries: list, per_class: int) -> list:
@@ -108,6 +95,9 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--workers", type=int, default=0)
+    parser.add_argument("--augment", action=argparse.BooleanOptionalAction, default=True,
+                        help="Apply on-the-fly training augmentations (default: on). "
+                             "Use --no-augment for a clean baseline.")
     parser.add_argument("--quick", action="store_true",
                         help="Train on a small subset for a fast pipeline smoke test.")
     args = parser.parse_args()
@@ -126,10 +116,13 @@ def main() -> None:
         args.epochs = min(args.epochs, 2)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    transform = build_transform()
+    # Train uses the augmented pipeline (unless --no-augment); val always uses the
+    # deterministic, grader-matched transform so metrics stay honest.
+    train_transform = build_train_transform() if args.augment else build_eval_transform()
+    eval_transform = build_eval_transform()
 
-    train_ds = ManifestDataset(train_entries, DATA_ROOT, transform)
-    val_ds = ManifestDataset(val_entries, DATA_ROOT, transform)
+    train_ds = ManifestDataset(train_entries, DATA_ROOT, train_transform)
+    val_ds = ManifestDataset(val_entries, DATA_ROOT, eval_transform)
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
                               num_workers=args.workers, pin_memory=False)
@@ -137,7 +130,7 @@ def main() -> None:
                             num_workers=args.workers, pin_memory=False)
 
     print(f"Device: {device} | train: {len(train_ds)} | val: {len(val_ds)} "
-          f"| epochs: {args.epochs} | batch: {args.batch_size}")
+          f"| epochs: {args.epochs} | batch: {args.batch_size} | augment: {args.augment}")
 
     model = ModelArchitecture(num_classes=20).to(device)
     criterion = nn.CrossEntropyLoss()
