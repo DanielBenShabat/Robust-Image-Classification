@@ -89,11 +89,34 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> floa
     return correct / max(total, 1)
 
 
+def build_scheduler(optimizer, epochs: int, warmup_epochs: int):
+    """Linear LR warmup for `warmup_epochs`, then cosine decay to ~0.
+
+    Stepped once per epoch. Falls back to plain cosine when there is no room
+    for warmup (e.g. the 2-epoch --quick smoke test).
+    """
+    from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
+
+    warmup_epochs = max(0, min(warmup_epochs, epochs - 1))
+    if warmup_epochs == 0:
+        return CosineAnnealingLR(optimizer, T_max=max(1, epochs))
+
+    warmup = LinearLR(optimizer, start_factor=0.01, total_iters=warmup_epochs)
+    cosine = CosineAnnealingLR(optimizer, T_max=max(1, epochs - warmup_epochs))
+    return SequentialLR(optimizer, [warmup, cosine], milestones=[warmup_epochs])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=12)
+    parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--weight-decay", type=float, default=1e-2,
+                        help="AdamW weight decay (L2 regularization).")
+    parser.add_argument("--warmup-epochs", type=int, default=3,
+                        help="Linear LR warmup epochs before cosine decay.")
+    parser.add_argument("--label-smoothing", type=float, default=0.1,
+                        help="Label smoothing for CrossEntropyLoss.")
     parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--augment", action=argparse.BooleanOptionalAction, default=True,
                         help="Apply on-the-fly training augmentations (default: on). "
@@ -131,11 +154,14 @@ def main() -> None:
 
     print(f"Device: {device} | train: {len(train_ds)} | val: {len(val_ds)} "
           f"| epochs: {args.epochs} | batch: {args.batch_size} | augment: {args.augment}")
+    print(f"Optim: AdamW(lr={args.lr}, wd={args.weight_decay}) | warmup: {args.warmup_epochs} "
+          f"| label_smoothing: {args.label_smoothing}")
 
     model = ModelArchitecture(num_classes=20).to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr,
+                                  weight_decay=args.weight_decay)
+    scheduler = build_scheduler(optimizer, args.epochs, args.warmup_epochs)
 
     best_acc = 0.0
     for epoch in range(1, args.epochs + 1):
